@@ -24,5 +24,5 @@ const firebase = getAdmin();
 
 module.exports = {
   db,
-  firebase,
+  admin: firebase,
 };

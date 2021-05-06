@@ -1,31 +1,36 @@
 const firebase = require("./firebase/index");
-const httpServer = require("http").createServer();
 const port = process.env.PORT || 3000;
 
-httpServer.listen(port);
+const httpServer = require("http").createServer();
+httpServer.listen(port, () => console.log(`Listening on port ${port}`));
 
-const io = require("socket.io")(httpServer);
+const io = require("socket.io")(httpServer, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"],
+  },
+});
 const ROOMS = "rooms";
 
-io.use((socket, next) => {
-  // (TBD) JWT-Authentication
-});
-
-io.of("/").on("connection", (socket) => {
+io.on("connection", (socket) => {
+  console.log("Websocket connection is established");
   socket.on("user_create_room", async (data) => {
     try {
       const { user_wallet, room_label } = data;
 
       const roomsRef = firebase.db.collection(ROOMS);
       const snapshot = await roomsRef.get();
-      for (let i = 0; i < snapshot.length; i++) {
-        const { server } = snapshot[i].data();
-        if (server === user_wallet) {
-          throw new Error("A user can create only one room");
-        }
+      const isCreated =
+        snapshot.docs.filter((doc) => {
+          const { server } = doc.data();
+          return server.address === user_wallet;
+        }).length > 0;
+
+      if (isCreated) {
+        throw new Error("A user can create only one room");
       }
       const timestamp = Math.round(new Date().getTime() / 1000);
-      const docId = await firebase.db.collection(ROOMS).add({
+      const docRef = await firebase.db.collection(ROOMS).add({
         server: {
           address: user_wallet,
           accepted: false,
@@ -33,9 +38,9 @@ io.of("/").on("connection", (socket) => {
         },
         label: room_label,
       });
-      socket.room_id = docId;
-      socket.join_id = user_wallet;
-      socket.join(docId);
+      socket.room_id = docRef.id;
+      socket.user_id = user_wallet;
+      socket.join(docRef.id);
 
       /**
        * Created Room Params
@@ -43,9 +48,13 @@ io.of("/").on("connection", (socket) => {
        * 2. Timestamp
        * 3. Room label
        */
-      io.to(socket.id).emit("room_created", docId, timestamp, room_label);
+      io.to(socket.id).emit("room_connected", docRef.id, room_label, timestamp);
+      io.to(socket.id).emit("owner_connected", docRef.id, user_wallet);
+      console.log(
+        `/INFO/user_create_room: a room is created on ${docRef.id}(${timestamp}, ${room_label}, ${user_wallet})`
+      );
     } catch (error) {
-      io.to(socket.id).emit("errors", error.message);
+      io.to(socket.id).emit("errors_connect", error.message);
       console.log("/ERROR/user_create_room: ", error);
     }
   });
@@ -80,11 +89,11 @@ io.of("/").on("connection", (socket) => {
        * 2. Label
        * 3. Other party wallet(address)
        */
-      socket.broadcast
-        .to(socket.room_id)
-        .emit("other_party_joined", room_id, label, user_wallet);
+      io.in(socket.room_id).emit("participant_joined", room_id, user_wallet);
+      io.to(socket.id).emit("owner_connected", room_id, server.address);
+      io.to(socket.id).emit("room_connected", room_id, label, timestamp);
     } catch (error) {
-      io.to(socket.id).emit("errors", error.message);
+      io.to(socket.id).emit("errors_connect", error.message);
       console.log("/ERROR/user_join_room: ", error);
     }
   });
@@ -127,6 +136,8 @@ io.of("/").on("connection", (socket) => {
     try {
       const docId = socket.room_id;
       const userWallet = socket.user_id;
+
+      if (!docId || !userWallet) return;
       socket.leave(docId);
 
       /**
@@ -145,13 +156,21 @@ io.of("/").on("connection", (socket) => {
       const docRef = await firebase.db.collection(ROOMS).doc(docId);
       const { server, client } = (await docRef.get()).data();
 
-      if (server.address === userWallet) {
+      if (server && server.address === userWallet) {
         // The document can be deleted or set "deleted" flag as `true` (TBD)
+        io.in(socket.room_id).emit("room_dropped", docId);
         await firebase.db.collection(ROOMS).doc(docId).delete();
-      } else if (client.address === userWallet) {
+        console.log(
+          `/INFO/disconnect: the current room is removed on ${docId}`
+        );
+      } else if (client && client.address === userWallet) {
         await firebase.db.collection(ROOMS).doc(docId).update({
-          client: undefined,
+          client: firebase.admin.firestore.FieldValue.delete(),
         });
+        io.in(socket.room_id).emit("participant_left", docId, userWallet);
+        console.log(
+          `/INFO/disconnect: a participant(${userWallet}) left the room`
+        );
       }
     } catch (error) {
       io.to(socket.id).emit("errors", error.message);
