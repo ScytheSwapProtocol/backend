@@ -29,7 +29,7 @@ io.on("connection", (socket) => {
       if (isCreated) {
         throw new Error("A user can create only one room");
       }
-      const timestamp = Math.round(new Date().getTime() / 1000);
+      const timestamp = new Date().getTime();
       const docRef = await firebase.db.collection(ROOMS).add({
         server: {
           address: user_wallet,
@@ -74,7 +74,7 @@ io.on("connection", (socket) => {
       socket.room_id = room_id;
       socket.user_id = user_wallet;
       socket.join(room_id);
-      const timestamp = Math.round(new Date().getTime() / 1000);
+      const timestamp = new Date().getTime();
       await docRef.update({
         client: {
           address: user_wallet,
@@ -98,6 +98,28 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("send_message", async (data) => {
+    try {
+      const { user_wallet, message } = data;
+      const room_id = socket.room_id;
+      const timestamp = new Date().getTime();
+      console.log(
+        `/INFO/send_message: a new message was sent from ${user_wallet} in ${room_id})`
+      );
+
+      io.in(room_id).emit(
+        "message_sent",
+        room_id,
+        user_wallet,
+        message,
+        timestamp
+      );
+    } catch (error) {
+      io.to(socket.id).emit("errors", error.message);
+      console.log("/ERROR/send_message: ", error);
+    }
+  });
+
   socket.on("user_leave_room", async (data) => {
     try {
       const { user_wallet, room_id } = data;
@@ -105,26 +127,30 @@ io.on("connection", (socket) => {
       socket.leave(room_id);
 
       /**
-       * User left Params
-       * 1. Doc Id
-       * 2. User wallet
-       */
-      socket.broadcast.to(room_id).emit("user_left_room", room_id, user_wallet);
-
-      /**
        * operations related to blockchain parts
        */
 
+      console.log("leave_room:", user_wallet, room_id);
+
       const docRef = await firebase.db.collection(ROOMS).doc(room_id);
+      if (!docRef) return;
       const { server, client } = (await docRef.get()).data();
 
-      if (server.address === user_wallet) {
+      if (server && server.address === user_wallet) {
         // The document can be deleted or set "deleted" flag as `true` (TBD)
+        io.in(room_id).emit("room_dropped", room_id);
         await firebase.db.collection(ROOMS).doc(room_id).delete();
-      } else if (client.address === user_wallet) {
+        console.log(
+          `/INFO/user_leave_room: the current room is removed on ${room_id}`
+        );
+      } else if (client && client.address === user_wallet) {
         await firebase.db.collection(ROOMS).doc(room_id).update({
-          client: undefined,
+          client: firebase.admin.firestore.FieldValue.delete(),
         });
+        io.in(room_id).emit("participant_left", room_id, user_wallet);
+        console.log(
+          `/INFO/user_leave_room: a participant(${user_wallet}) left the room`
+        );
       }
     } catch (error) {
       io.to(socket.id).emit("errors", error.message);
@@ -139,15 +165,6 @@ io.on("connection", (socket) => {
 
       if (!docId || !userWallet) return;
       socket.leave(docId);
-
-      /**
-       * User left Params
-       * 1. Doc Id
-       * 2. User wallet
-       */
-      socket.broadcast
-        .to(socket.room_id)
-        .emit("user_left_room", docId, userWallet);
 
       /**
        * operations related to blockchain parts
