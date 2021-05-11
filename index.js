@@ -1,10 +1,12 @@
 const firebase = require("./firebase/index");
 const port = process.env.PORT || 3000;
+const express = require("express");
 
-const httpServer = require("http").createServer();
-httpServer.listen(port, () => console.log(`Listening on port ${port}`));
+const socketServer = express()
+  .use((req, res) => res.sendFile(INDEX, { root: __dirname }))
+  .listen(port, () => console.log(`Listening on ${port}`));
 
-const io = require("socket.io")(httpServer, {
+const io = require("socket.io")(socketServer, {
   cors: {
     origin: "*",
     methods: ["GET", "POST"],
