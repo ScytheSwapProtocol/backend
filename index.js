@@ -120,6 +120,43 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("change_allowance", async (data) => {
+    try {
+      const { user_wallet, room_id, is_approved } = data;
+
+      const docRef = await firebase.db.collection(ROOMS).doc(room_id);
+      const { server, client } = (await docRef.get()).data();
+
+      if (user_wallet === server.address) {
+        await docRef.update({
+          server: {
+            ...server,
+            accepted: is_approved,
+          },
+        });
+      } else if (user_wallet === client.address) {
+        await docRef.update({
+          client: {
+            ...client,
+            accepted: is_approved,
+          },
+        });
+      }
+      console.log(
+        `/INFO/change_allowance: allowance of ${user_wallet}(${room_id}) is changed as <${is_approved}>`
+      );
+      io.in(room_id).emit(
+        "allowance_changed",
+        room_id,
+        user_wallet,
+        is_approved
+      );
+    } catch (error) {
+      io.to(socket.id).emit("errors", error.message);
+      console.log("/ERROR/change_allowance: ", error);
+    }
+  });
+
   socket.on("user_leave_room", async (data) => {
     try {
       const { user_wallet, room_id } = data;
