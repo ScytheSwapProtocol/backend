@@ -124,16 +124,20 @@ io.on("connection", (socket) => {
 
   socket.on("change_allowance", async (data) => {
     try {
-      const { user_wallet, room_id, is_approved } = data;
+      const { user_wallet, room_id, is_approved, assets } = data;
 
       const docRef = await firebase.db.collection(ROOMS).doc(room_id);
       const { server, client } = (await docRef.get()).data();
 
       if (user_wallet === server.address) {
+        if (!client) {
+          throw new Error("Can't approve until a participant joins");
+        }
         await docRef.update({
           server: {
             ...server,
             accepted: is_approved,
+            assets,
           },
         });
       } else if (user_wallet === client.address) {
@@ -141,6 +145,7 @@ io.on("connection", (socket) => {
           client: {
             ...client,
             accepted: is_approved,
+            assets,
           },
         });
       }
