@@ -131,6 +131,139 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("trade_assets", async (data) => {
+    try {
+      const { user_wallet, assets } = data;
+      const room_id = socket.room_id;
+      const timestamp = new Date().getTime();
+      const docRef = await firebase.db.collection(ROOMS).doc(room_id);
+      const { server, client } = (await docRef.get()).data();
+
+      console.log(
+        `/INFO/trade_asset: move assets from ${user_wallet} in ${room_id} to escrow`
+      );
+
+      if (server.address === user_wallet) {
+        await firebase.db.collection(ROOMS).doc(room_id).update({
+          server: {
+            assets,
+          },
+        });
+      } else if (client.address === user_wallet) {
+        await firebase.db.collection(ROOMS).doc(room_id).update({
+          client: {
+            assets,
+          },
+        });
+      }
+
+      io.in(room_id).emit(
+        "escrow_assets",
+        room_id,
+        user_wallet,
+        assets,
+        timestamp
+      );
+    } catch (error) {
+      io.to(socket.id).emit("errors", error.message);
+      console.log("/ERROR/trade_assets: ", error);
+    }
+  });
+
+  socket.on("approve_assets", async (data) => {
+    try {
+      const { user_wallet, assets } = data;
+      const room_id = socket.room_id;
+      const timestamp = new Date().getTime();
+      const docRef = await firebase.db.collection(ROOMS).doc(room_id);
+      const { server, client } = (await docRef.get()).data();
+
+      console.log(
+        `/INFO/trade_asset: move assets from ${user_wallet} in ${room_id} to escrow`
+      );
+
+      if (server.address === user_wallet) {
+        await firebase.db
+          .collection(ROOMS)
+          .doc(room_id)
+          .update({
+            server: {
+              assets,
+              accepted: true,
+            },
+          });
+      } else if (client.address === user_wallet) {
+        await firebase.db
+          .collection(ROOMS)
+          .doc(room_id)
+          .update({
+            client: {
+              assets,
+              accepted: true,
+            },
+          });
+      }
+
+      io.in(room_id).emit(
+        "approved_assets",
+        room_id,
+        user_wallet,
+        assets,
+        timestamp
+      );
+    } catch (error) {
+      io.to(socket.id).emit("errors", error.message);
+      console.log("/ERROR/approve_assets: ", error);
+    }
+  });
+
+  socket.on("decline_assets", async (data) => {
+    try {
+      const { user_wallet, assets } = data;
+      const room_id = socket.room_id;
+      const timestamp = new Date().getTime();
+      const docRef = await firebase.db.collection(ROOMS).doc(room_id);
+      const { server, client } = (await docRef.get()).data();
+
+      console.log(
+        `/INFO/trade_asset: move assets from ${user_wallet} in ${room_id} to escrow`
+      );
+
+      if (server.address === user_wallet) {
+        await firebase.db
+          .collection(ROOMS)
+          .doc(room_id)
+          .update({
+            server: {
+              assets,
+              accepted: false,
+            },
+          });
+      } else if (client.address === user_wallet) {
+        await firebase.db
+          .collection(ROOMS)
+          .doc(room_id)
+          .update({
+            client: {
+              assets,
+              accepted: false,
+            },
+          });
+      }
+
+      io.in(room_id).emit(
+        "declined_assets",
+        room_id,
+        user_wallet,
+        assets,
+        timestamp
+      );
+    } catch (error) {
+      io.to(socket.id).emit("errors", error.message);
+      console.log("/ERROR/decline_assets: ", error);
+    }
+  });
+
   socket.on("change_allowance", async (data) => {
     try {
       const { user_wallet, room_id, is_approved, assets } = data;
